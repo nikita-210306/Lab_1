@@ -274,22 +274,25 @@ for (sx in c("мужчины", "женщины")) {
 usable <- data.frame(Показатель = c(audit$Поле, "Q12", "infl_obs", "infl_exp", "Доход на человека"),
  N = c(audit$Пригодно, sum(!is.na(Data$Q12)), gobs$N, gexp$N, length(yy)), check.names = FALSE)
 
-# Официальные числа из примера друга намеренно НЕ используются: происхождение не подтверждено.
-# ЗАПОЛНИТЬ: по точным таблицам Банка России, январь—август 2026 (8 значений).
-# Источник: https://www.cbr.ru/Collection/Collection/File/62282/inFOM_26-08.pdf
-# Точность и дата получения также заполняются после проверки источника.
-official_obs <- rep(NA_real_, 8) # ЗАПОЛНИТЬ: медианы наблюдаемой инфляции, % годовых.
-official_exp <- rep(NA_real_, 8) # ЗАПОЛНИТЬ: медианы ожидаемой инфляции, % годовых.
-official_ITS <- rep(NA_real_, 8) # ЗАПОЛНИТЬ: индекс текущего состояния, пункты.
-official_IPO <- rep(NA_real_, 8) # ЗАПОЛНИТЬ: индекс потребительских ожиданий, пункты.
-official_IPN <- rep(NA_real_, 8) # ЗАПОЛНИТЬ: индекс потребительских настроений, пункты.
-official_date <- NA_character_ # ЗАПОЛНИТЬ: дата успешного получения, YYYY-MM-DD.
-official_precision <- NA_character_ # ЗАПОЛНИТЬ: точность публикации.
+# Источник: предоставленный PDF inFOM_26-08.pdf (август 2026, волна 162).
+# Порядок значений: январь, февраль, март, апрель, май, июнь, июль, август 2026.
+# С. 10, рис. 6: опубликованные подписи с точностью 0,1 п. п.
+official_obs <- c(14.5, 14.5, 15.6, 14.6, 15.1, 14.2, 15.1, 14.3)
+official_exp <- c(13.7, 13.1, 13.4, 12.9, 13.0, 12.4, 14.7, 13.7)
+# С. 14, рис. 12: опубликованные подписи с точностью 1 пункт.
+official_ITS <- c(91, 88, 88, 85, 89, 89, 86, 87)
+official_IPO <- c(107, 104, 105, 101, 102, 104, 92, 96)
+official_IPN <- c(101, 98, 98, 94, 96, 98, 90, 93)
+official_date <- "2026-10-18" # Дата получения и проверки предоставленного PDF.
+official_precision <- "Медианы: 0,1 п. п.; индексы: 1 пункт"
+official_income_median <- 27300 # Рис. 16, с. 20: 27,3 тыс. руб.
+stopifnot(all(c(length(official_obs), length(official_exp), length(official_ITS),
+                length(official_IPO), length(official_IPN)) == 8))
 months <- c("янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен")
 history <- data.frame(Период = paste0("2026-", sprintf("%02d", 1:9)),
  obs = c(official_obs, gobs$value), exp = c(official_exp, gexp$value),
  ITS = c(official_ITS, ITS), IPO = c(official_IPO, IPO), IPN = c(official_IPN, IPN),
- Источник = c(rep("Опубликованный ряд: значение не получено", 8), "Синтетическая выборка"),
+ Источник = c(rep("Опубликованный ряд", 8), "Синтетическая выборка"),
  check.names = FALSE)
 hist_ok <- !is.na(history$obs) | !is.na(history$exp) | !is.na(history$ITS) |
  !is.na(history$IPO) | !is.na(history$IPN)
@@ -364,7 +367,7 @@ time_plot <- function(columns, labels, units) {
    data.frame(Месяц = 1:9, Показатель = labels[j], Значение = history[[columns[j]]]))
  old <- z[z$Месяц <= 8 & !is.na(z$Значение), ]; new <- z[z$Месяц == 9, ]
  p <- ggplot(z, aes(Месяц, Значение, color = Показатель)) +
-  geom_line(data = old, aes(linetype = Показатель), linewidth = .7) +
+  geom_line(data = old, aes(linetype = Показатель, group = Показатель), linewidth = .7) +
   geom_point(data = old, size = 2) + geom_point(data = new, shape = 17, size = 3.5) +
   scale_x_continuous(breaks = 1:9, labels = months, limits = c(.7, 9.3)) +
   labs(x = "Месяц 2026 года", y = units, color = "Показатель", linetype = "Показатель")
@@ -394,6 +397,7 @@ openxlsx::write.xlsx(tables, file.path(out_dir, "tables.xlsx"), overwrite = TRUE
 write.csv(Data, file.path(out_dir, "calculated_data.csv"), row.names = FALSE, na = "", fileEncoding = "UTF-8")
 capture.output(sessionInfo(), file = file.path(out_dir, "sessionInfo.txt"))
 fmt <- function(x, digits = 1) format(round(x, digits), nsmall = digits, trim = TRUE, decimal.mark = ",")
+fmt_signed <- function(x, digits = 1) paste0(ifelse(x > 0, "+", ""), fmt(x, digits))
 table_no <- 0
 tbl <- function(d, title, digits = 1) {
  table_no <<- table_no + 1
@@ -462,9 +466,9 @@ if (isTRUE(getOption("knitr.in.progress"))) print(fig5)
 
 if (isTRUE(getOption("knitr.in.progress"))) print(fig6)
 
-if (isTRUE(getOption("knitr.in.progress"))) print(fig7)
+if (interactive() || isTRUE(getOption("knitr.in.progress"))) print(fig7)
 
-if (isTRUE(getOption("knitr.in.progress"))) print(fig8)
+if (interactive() || isTRUE(getOption("knitr.in.progress"))) print(fig8)
 
-tbl(history[, 1:7], "Помесячные уровни и источник: NA означает отсутствие подтвержденного числа")
+tbl(history[, 1:7], "Помесячные уровни и источник: официальные уровни и учебный сентябрь")
 tbl(delta[, 1:6], "Динамика август → учебный сентябрь: разность уровней")
