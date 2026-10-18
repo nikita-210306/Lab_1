@@ -25,7 +25,7 @@ dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(file.path(out_dir, "figures"), showWarnings = FALSE, recursive = TRUE)
 options(scipen = 20, knitr.kable.NA = "нет данных")
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
-                      fig.width = 8.5, fig.height = 5.2, dpi = 180,
+                      fig.width = 7, fig.height = 3.4, dpi = 180,
                       dev = "png", dev.args = list(type = "cairo"))
 library(openxlsx)
 library(ggplot2)
@@ -403,7 +403,12 @@ tbl <- function(d, title, digits = 1) {
  table_no <<- table_no + 1
  cat("\n\n::: {custom-style=\"Table Caption\"}\nТаблица ", table_no, ". ", title, "\n:::\n\n", sep = "")
  for (j in seq_along(d)) if (is.numeric(d[[j]]) && !is.integer(d[[j]])) d[[j]] <- round(d[[j]], digits)
- print(knitr::kable(d, format = "pipe", row.names = FALSE, digits = digits))
+ k <- knitr::kable(d, format = "pipe", row.names = FALSE, digits = digits)
+ widths <- table_widths(d)
+ spec <- character(ncol(d))
+ for (j in seq_along(d)) spec[j] <- paste0(":",paste(rep("-",round(widths[j]*10)),collapse=""))
+ k[2] <- paste0("|",paste(spec,collapse="|"),"|")
+ print(k)
  cat("\n\n")
 }
 median_sub <- function(gm, what) {
@@ -416,59 +421,140 @@ median_sub <- function(gm, what) {
 }
 
 
-tbl(quality, "Проверка структуры, значений и логики", 0)
-tbl(usable, "Число пригодных наблюдений по показателям", 0)
-tbl(audit[, 1:5], "Основания частотных таблиц, технические и недопустимые ответы", 0)
-tbl(audit[, c(1, 6:8)], "Структурные пропуски и согласованность условий задавания", 0)
-
-for (nm in c(paste0("Q", c(1:11, 13)), attrs[attrs %in% names(freq)])) {
- base <- audit$Основание[match(nm, audit$Поле)]
- tbl(freq[[nm]], paste0(nm, ": частоты и доли; основание N = ", base), 0)
+# Только представление уже рассчитанных данных; исходные вычисления не меняются.
+table_widths <- function(d) {
+ h <- names(d)
+ if (identical(h,c("Проверка","Число"))) return(c(13.5,2.5))
+ if (identical(h,c("Показатель","N","Тех.","Стр.","Недоп."))) return(c(7.5,2.5,2,2,2))
+ if (h[1]=="Категория" && length(h)==3) return(c(11,2.5,2.5))
+ if (h[1]=="Членов семьи") return(c(9,3.5,3.5))
+ if (h[1]=="Ответ") return(c(7.2,2.2,2.2,2.2,2.2))
+ if (h[1]=="Категория" && length(h)==4) return(c(8.6,2,2.1,3.3))
+ if (h[1]=="Категория" && length(h)==6) return(c(5,2,2.25,2.25,2.25,2.25))
+ if (h[1]=="Показатель" && length(h)==6) return(c(3.8,2.1,2.1,3,2.1,2.9))
+ if (h[1]=="Доход, тыс.") return(c(3.6,2.1,2.3,3.6,2.1,2.3))
+ if (h[1]=="Группа") return(c(2,6.1,2,2.7,3.2))
+ if (h[1]=="Ответ Q5") return(c(5,rep(2.2,5)))
+ if (h[1]=="Месяц") return(c(2.1,2.5,2.5,1.7,1.7,1.7,3.8))
+ if (h[1]=="Показатель" && length(h)==5) return(c(4.3,2.5,3,3,3.2))
+ if (length(h)==8) return(c(2.2,1.2,2.1,2.1,2.1,2,2,2.3))
+ if (length(h)==2) return(c(11,5))
+ rep(16/length(h),length(h))
 }
-for (nm in names(freq_all)) tbl(freq_all[[nm]], paste0(nm, ": доли от всей выборки, N = ", N), 0)
-tbl(family_stats, "Q12: описательные показатели размера семьи")
-tbl(family_f, "Q12: распределение числа членов семьи", 0)
+compact_audit <- data.frame(Показатель = audit$Поле, N = audit$Пригодно,
+ `Тех.` = audit[[4]], `Стр.` = audit[[6]],
+ `Недоп.` = audit[[5]] + audit[[7]] + audit[[8]], check.names = FALSE)
+for (nm in c("Q12", "infl_obs", "infl_exp", "Доход на человека")) {
+ compact_audit <- rbind(compact_audit, data.frame(Показатель = nm,
+ N = usable$N[match(nm, usable$Показатель)], `Тех.` = "—", `Стр.` = "—", `Недоп.` = "—", check.names = FALSE))
+}
+paired_freq <- function(q1, q2, labels, from_all = FALSE) {
+ a <- if (from_all) freq_all[[q1]] else freq[[q1]]
+ b <- if (from_all) freq_all[[q2]] else freq[[q2]]
+ stopifnot(length(labels) == nrow(a), nrow(a) == nrow(b))
+ ans <- data.frame(Ответ = labels, a[[2]], a[[3]], b[[2]], b[[3]], check.names = FALSE)
+ names(ans) <- c("Ответ", paste0("n ",q1), paste0("% ",q1), paste0("n ",q2), paste0("% ",q2))
+ ans
+}
+interval_labels <- paste0(format(income_breaks[-length(income_breaks)]/1000, trim=TRUE),
+ "–",format(income_breaks[-1]/1000, trim=TRUE))
+half <- ceiling(length(income_f)/2)
+compact_income_series <- data.frame(matrix("", nrow = half, ncol = 6), check.names = FALSE)
+names(compact_income_series) <- c("Доход, тыс.", "n", "F", "Доход, тыс.", "n", "F")
+for (j in seq_along(income_f)) {
+ row <- ifelse(j <= half, j, j-half)
+ cols <- if (j <= half) 1:3 else 4:6
+ compact_income_series[row, cols] <- c(interval_labels[j], income_f[j], income_F[j])
+}
+range_labels <- character(nrow(groups))
+for (j in seq_len(nrow(groups))) {
+ range_labels[j] <- paste0(ifelse(j==1,"[","("),fmt(groups$Нижняя[j]),"; ",fmt(groups$Верхняя[j]),"]")
+}
+compact_groups <- data.frame(Группа=groups$Группа, `Доход, руб.`=range_labels,
+ N=groups[[4]], `N инф.`=groups[[6]], `Медиана, %`=groups$Медиана,check.names=FALSE)
+compact_group_q5 <- data.frame(`Ответ Q5`=short_year,check.names=FALSE)
+for (g in group_labels) compact_group_q5[[paste0(g, ", %")]] <- group_q5[group_q5$Группа==g,5]
+compact_history <- data.frame(Месяц=months, `Набл., %`=history$obs, `Ожид., %`=history$exp,
+ ИТС=history$ITS, ИПО=history$IPO, ИПН=history$IPN,
+ Источник=c(rep("инФОМ",8),"Учебн."),check.names=FALSE)
+page_break <- function() {
+ if (isTRUE(getOption("knitr.in.progress"))) {
+  if (knitr::is_html_output()) cat("\n<div class='page-break'></div>\n")
+  else cat("\n```{=openxml}\n<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>\n```\n")
+ }
+}
 
-tbl(data.frame(Категория = code_labels, `Код, %` = code_values,
- `Нижняя граница L` = ifelse(is.na(lower), "не применяется", fmt(lower)),
- `Ширина h` = ifelse(is.na(width), "не применяется", fmt(width)), check.names = FALSE),
- "Правила числовой перекодировки и интерполяционные границы")
-tbl(infl_stats, "Число ответов, обычные медианы, квартили и уточненные медианы, % годовых")
+tbl(quality, "Проверка структуры и значений", 0)
+tbl(compact_audit, "Пригодные ответы N, технические и структурные пропуски", 0)
 
-tbl(gobs$table, "Наблюдаемая инфляция: частоты n и накопленные частоты F", 1)
-tbl(gexp$table, "Ожидаемая инфляция: частоты n и накопленные частоты F", 1)
-median_sub(gobs, "Наблюдаемая инфляция")
-median_sub(gexp, "Ожидаемая инфляция")
+for (nm in attrs[attrs %in% names(freq)]) {
+ tbl(freq[[nm]], paste0(nm, "; N = ", audit$Основание[match(nm, audit$Поле)]), 0)
+}
+tbl(paired_freq("Q1", "Q2", short_month), "Q1/Q2: цены за прошлый и следующий месяц; N = 2000", 0)
+tbl(paired_freq("Q3", "Q5", short_year), "Q3/Q5: направление изменения цен за прошлый и следующий год; N = 2000", 0)
+tbl(paired_freq("Q4", "Q6", valid$Q4), paste0("Q4/Q6: интервалы роста; N4 = ", sum(asked4 %in% TRUE), ", N6 = ", sum(asked6 %in% TRUE)), 0)
+tbl(paired_freq("Q7", "Q8", c("Улучшение", "Без изменений", "Ухудшение", "Затрудняюсь ответить")), "Q7/Q8: материальное положение семьи; N = 2000", 0)
+for (nm in c("Q9", "Q10", "Q11")) tbl(freq[[nm]], paste0(nm, "; N = ", audit$Основание[match(nm, audit$Поле)]), 0)
+q13 <- freq$Q13
+q13$`Код H, руб.` <- ifelse(is.na(income_codes), "Исключен", format(income_codes, scientific = FALSE, trim = TRUE))
+tbl(q13, "Q13: доход семьи и его перекодировка; N = 2000", 0)
+tbl(paired_freq("Q4", "Q6", freq_all$Q4$Категория, from_all = TRUE), "Q4/Q6: доли от всей выборки, включая незаданный вопрос; N = 2000", 0)
+tbl(family_stats, "Q12: размер семьи")
+tbl(family_f, "Q12: частоты размеров семьи", 0)
 
-tbl(data.frame(Категория = income_levels, `Доход семьи, руб.` = income_codes,
- check.names = FALSE), "Перекодировка Q13 в совокупный доход семьи", 0)
-tbl(income_stats, "Описательные показатели дохода на человека, руб. в месяц")
-tbl(income_series, "Интервальный ряд дохода с шагом 5000 руб., частоты n и накопленные F", 0)
+infl_table <- data.frame(Категория = code_labels, Код = code_values,
+ n1 = gobs$table$n, F1 = gobs$table$F, n2 = gexp$table$n, F2 = gexp$table$F, check.names = FALSE)
+tbl(infl_table, "Перекодировка, частоты n и накопленные частоты F", 1)
+inf_short <- infl_stats
+names(inf_short) <- c("Показатель","N","Q1","Медиана","Q3","Уточн.")
+tbl(inf_short, "Медианы и квартили, % годовых")
 
-tbl(private, "Частные индексы: числители, основания, доли и итоговые значения")
+median_sub(gobs, "Наблюдаемая")
+median_sub(gexp, "Ожидаемая")
 
-tbl(composite, "Составные индексы и независимая проверка ИПН, пункты")
+income_vertical <- data.frame(Показатель = c("N", "Среднее", "Медиана", "Первый квартиль", "Третий квартиль", "IQR", "Уточненная медиана"),
+ Значение = as.numeric(unlist(income_stats[1, ])), check.names = FALSE)
+tbl(income_vertical, "Доход на человека, руб. в месяц")
+tbl(compact_income_series, "Интервальный ряд дохода: частоты n и накопленные F", 0)
 
-tbl(groups, "Границы квантильных групп дохода, основания и обычные медианы infl_exp")
-tbl(group_q5, "Частоты и доли ответов Q5 по пяти группам дохода", 0)
+pr_short <- private
+names(pr_short) <- c("Индекс","Q","n+","n−","N","P, %","M, %","Знач.")
+tbl(pr_short, "Частные индексы и основания расчета")
+tbl(composite[1:3, ], "Составные индексы, пункты")
 
-tbl(sex_ipn, "ИПН мужчин и женщин, пункты; основания каждого частного индекса")
+tbl(compact_groups, "Границы дохода, основания и обычная медиана ожидаемой инфляции")
+tbl(compact_group_q5, "Доли Q5 внутри групп дохода, %; основания — N групп", 0)
+tbl(sex_ipn[, c("Пол", "N", "ИПН")], "ИПН мужчин и женщин, пункты")
+
+page_break()
 
 if (isTRUE(getOption("knitr.in.progress"))) print(fig1)
 
 if (isTRUE(getOption("knitr.in.progress"))) print(fig2)
 
+page_break()
+
 if (isTRUE(getOption("knitr.in.progress"))) print(fig3)
 
+page_break()
+
 if (isTRUE(getOption("knitr.in.progress"))) print(fig4)
+
+page_break()
 
 if (isTRUE(getOption("knitr.in.progress"))) print(fig5)
 
 if (isTRUE(getOption("knitr.in.progress"))) print(fig6)
 
-if (interactive() || isTRUE(getOption("knitr.in.progress"))) print(fig7)
+page_break()
 
-if (interactive() || isTRUE(getOption("knitr.in.progress"))) print(fig8)
+if (isTRUE(getOption("knitr.in.progress"))) print(fig7)
 
-tbl(history[, 1:7], "Помесячные уровни и источник: официальные уровни и учебный сентябрь")
-tbl(delta[, 1:6], "Динамика август → учебный сентябрь: разность уровней")
+page_break()
+
+if (isTRUE(getOption("knitr.in.progress"))) print(fig8)
+
+page_break()
+
+tbl(compact_history, "Помесячные уровни и источник")
+tbl(delta[, 1:5], "Август → учебный сентябрь: разность уровней")
