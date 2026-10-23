@@ -1,0 +1,312 @@
+---
+title: "Практикум 3. Формирование выборки"
+author: "Маркин Никита Алексеевич, Б24-902"
+date: "2026-10-23"
+lang: ru-RU
+output:
+  html_document:
+    self_contained: true
+    mathjax: null
+    pandoc_args: ["--mathml"]
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = TRUE,
+                      fig.width = 9, fig.height = 6.5, dpi = 150,
+                      dev = "png", dev.args = list(type = "cairo"))
+options(scipen = 20)
+```
+
+## 1. Подготовка и описание данных
+
+Оцениваем среднюю массу пингвинов по четырем схемам отбора. Генеральная
+совокупность — записи Palmer Penguins с известной массой. Порядок строк
+после удаления пропусков сохраняем.
+
+```{r population}
+# Если пакеты не установлены, выполнить один раз:
+# install.packages(c("palmerpenguins", "ggplot2", "knitr", "rmarkdown"))
+library(palmerpenguins)
+library(ggplot2)
+
+population <- as.data.frame(
+  penguins[!is.na(penguins$body_mass_g), c("species", "body_mass_g")]
+)
+rownames(population) <- NULL
+
+mass <- population$body_mass_g
+N <- nrow(population)
+counts <- table(population$species)
+species_names <- names(counts)
+weights <- as.numeric(counts) / N
+
+reference_mean <- mean(mass)
+population_variance <- mean((mass - reference_mean)^2)
+
+knitr::kable(data.frame(
+  Показатель = c("Объем совокупности", "Средняя масса, г",
+                "Дисперсия с делителем N, г²"),
+  Значение = c(N, reference_mean, population_variance)
+), digits = 3, row.names = FALSE)
+
+species_mean <- numeric(length(species_names))
+for (h in seq_along(species_names)) {
+  species_mean[h] <- mean(mass[population$species == species_names[h]])
+}
+knitr::kable(data.frame(
+  Вид = species_names,
+  Численность = as.integer(counts),
+  Доля = weights,
+  `Средняя масса, г` = species_mean,
+  check.names = FALSE
+), digits = 3, row.names = FALSE)
+
+stopifnot(N == 342L, sum(counts) == N)
+```
+
+Эталонная средняя равна **`r round(reference_mean, 3)` г**. Далее она нужна
+только для сравнения результатов, а не для вычисления выборочных оценок.
+
+## 2. Разведочная выборка и объем отбора
+
+Для планирования используем 25 заданных наблюдений, вероятность 0,95 и
+предельную ошибку 150 г. Разведочную выборку из совокупности не исключаем.
+
+```{r pilot}
+pilot_idx <- c(
+    1, 15, 23, 26, 34,
+   35, 43, 51, 61, 89,
+  109, 119, 191, 193, 196,
+  206, 211, 245, 262, 271,
+  284, 286, 292, 314, 331
+)
+pilot_sample <- population[pilot_idx, , drop = FALSE]
+
+probability <- 0.95
+limit <- 150
+pilot_n <- nrow(pilot_sample)
+pilot_mean <- mean(pilot_sample$body_mass_g)
+pilot_variance <- var(pilot_sample$body_mass_g)
+t_value <- qt((1 + probability) / 2, df = pilot_n - 1)
+
+n_exact <- N * t_value^2 * pilot_variance /
+  (N * limit^2 + t_value^2 * pilot_variance)
+n <- as.integer(ceiling(n_exact))
+
+knitr::kable(data.frame(
+  Показатель = c("Объем разведочной выборки", "Разведочное среднее, г",
+                "Исправленная дисперсия, г²", "Квантиль Стьюдента (df = 24)",
+                "Объем до округления", "Объем n"),
+  Значение = c(pilot_n, pilot_mean, pilot_variance, t_value, n_exact, n)
+), digits = 4, row.names = FALSE)
+```
+
+При использовании исправленной разведочной дисперсии поправка на конечную
+совокупность дает:
+
+$$\Delta\approx t\sqrt{\frac{s_0^2}{n}\left(1-\frac{n}{N}\right)},
+\qquad n=\left\lceil\frac{Nt^2s_0^2}{N\Delta^2+t^2s_0^2}\right\rceil.$$
+
+Получаем $n=\lceil`r round(n_exact, 4)`\rceil=`r n`$. Этот объем
+одинаков для всех четырех методов. Планирование приближенное и не
+гарантирует допустимую ошибку у каждой отдельной выборки.
+
+## 3. Формирование выборок
+
+Разделим общий объем пропорционально численностям видов. Сначала берем
+целые части, затем распределяем остаток между наибольшими дробными
+частями. При равных дробных частях сохраняется порядок видов в таблице.
+
+```{r allocation}
+quota <- n * weights
+stratum_n <- as.integer(floor(quota))
+remainder <- n - sum(stratum_n)
+if (remainder > 0L) {
+  priority <- order(-(quota - stratum_n), seq_along(stratum_n))
+  for (h in priority[seq_len(remainder)]) {
+    stratum_n[h] <- stratum_n[h] + 1L
+  }
+}
+
+stopifnot(sum(stratum_n) == n, all(stratum_n > 0L),
+          all(stratum_n <= as.integer(counts)))
+
+knitr::kable(data.frame(
+  Вид = species_names,
+  N_h = as.integer(counts),
+  W_h = weights,
+  `Расчетная квота` = quota,
+  n_h = stratum_n,
+  check.names = FALSE
+), digits = 4, row.names = FALSE)
+```
+
+ПСВ и ПСБ используют обычное среднее отобранных масс. СТВ и СТБ используют
+средние внутри видов с весами **генеральной совокупности**:
+$\widehat\mu=\sum_h W_h\bar y_h$, где $W_h=N_h/N$.
+Обозначения: ПСВ — простой повторный, ПСБ — простой бесповторный,
+СТВ — стратифицированный повторный, СТБ — стратифицированный бесповторный.
+
+```{r sampling}
+B <- 1000L
+RNGkind(kind = "Mersenne-Twister", normal.kind = "Inversion",
+        sample.kind = "Rejection")
+seed <- 20261023L
+set.seed(seed)
+initial_state <- .Random.seed
+
+# Одна функция выполняет B реализаций выбранной схемы отбора.
+simulate_means <- function(with_replacement, stratified = FALSE) {
+  answer <- numeric(B)
+  for (b in seq_len(B)) {
+    if (stratified) {
+      averages <- numeric(length(species_names))
+      for (h in seq_along(species_names)) {
+        rows_h <- which(population$species == species_names[h])
+        selected <- rows_h[sample.int(length(rows_h), stratum_n[h],
+                                      replace = with_replacement)]
+        averages[h] <- mean(mass[selected])
+      }
+      answer[b] <- sum(weights * averages)
+    } else {
+      selected <- sample.int(N, n, replace = with_replacement)
+      answer[b] <- mean(mass[selected])
+    }
+  }
+  answer
+}
+
+estimates <- list(
+  "ПСВ" = simulate_means(with_replacement = TRUE),
+  "ПСБ" = simulate_means(with_replacement = FALSE),
+  "СТВ" = simulate_means(with_replacement = TRUE, stratified = TRUE),
+  "СТБ" = simulate_means(with_replacement = FALSE, stratified = TRUE)
+)
+
+stopifnot(all(lengths(estimates) == B),
+          all(is.finite(unlist(estimates))))
+```
+
+Установлен **`seed = 20261023`**; генератор Mersenne-Twister, выбор
+номеров — Rejection. Генератор между реализациями не переинициализируется.
+В `estimates` находятся четыре массива по 1000 оценок, полученных по
+выборкам одного объема `r n`. При повторном отборе совпадения номеров
+допускаются; при бесповторном `sample.int()` их исключает.
+
+## 4. Ошибки и показатели точности
+
+Знаковая ошибка — оценка минус эталон. Смещение — средняя знаковая ошибка;
+стандартная ошибка — `sd()` по 1000 оценкам; RMSE — корень из средней
+квадратичной ошибки. Последний показатель — доля ошибок в пределах ±150 г.
+
+```{r statistics}
+errors <- lapply(estimates, function(x) x - reference_mean)
+metrics <- matrix(NA_real_, nrow = 5, ncol = 4,
+                  dimnames = list(c("Среднее", "Смещение", "SE", "RMSE", "Доля"),
+                                  names(estimates)))
+
+for (method in names(estimates)) {
+  x <- estimates[[method]]
+  e <- errors[[method]]
+  metrics[, method] <- c(mean(x), mean(e), sd(x),
+                         sqrt(mean(e^2)), mean(abs(e) <= limit))
+}
+```
+
+## 5. Графики
+
+На обоих рисунках ширина интервалов равна **25 г**, шкалы внутри каждого
+рисунка общие. Красная линия на первом рисунке — эталонное среднее.
+На втором сплошная линия показывает 0 г, пунктирные — −150 и +150 г.
+
+```{r plot-data}
+plot_data <- data.frame(
+  Метод = factor(rep(names(estimates), each = B), levels = names(estimates)),
+  Средняя = unlist(estimates, use.names = FALSE),
+  Ошибка = unlist(errors, use.names = FALSE)
+)
+step <- 25
+mass_breaks <- seq(floor(min(plot_data$Средняя) / step) * step,
+                    ceiling(max(plot_data$Средняя) / step) * step, by = step)
+error_edge <- ceiling(max(abs(plot_data$Ошибка), limit) / step) * step
+error_breaks <- seq(-error_edge, error_edge, by = step)
+colors <- c("ПСВ" = "#4c78a8", "ПСБ" = "#e69542",
+            "СТВ" = "#54976a", "СТБ" = "#9d79b2")
+```
+
+```{r means-plot, fig.cap='Рисунок 1. Распределения оценок средней массы.'}
+ggplot(plot_data, aes(x = Средняя, fill = Метод)) +
+  geom_histogram(breaks = mass_breaks, color = "white") +
+  geom_vline(xintercept = reference_mean, color = "#b2182b", linewidth = 0.7) +
+  facet_wrap(~ Метод, ncol = 2) +
+  scale_fill_manual(values = colors) +
+  coord_cartesian(xlim = range(mass_breaks)) +
+  labs(x = "Оценка средней массы, г", y = "Число реализаций") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+```
+
+```{r errors-plot, fig.cap='Рисунок 2. Распределения знаковых ошибок оценивания.'}
+ggplot(plot_data, aes(x = Ошибка, fill = Метод)) +
+  geom_histogram(breaks = error_breaks, color = "white") +
+  geom_vline(xintercept = 0, color = "#333333", linewidth = 0.7) +
+  geom_vline(xintercept = c(-limit, limit), color = "#b2182b",
+             linetype = "dashed", linewidth = 0.7) +
+  facet_wrap(~ Метод, ncol = 2) +
+  scale_fill_manual(values = colors) +
+  coord_cartesian(xlim = range(error_breaks)) +
+  labs(x = "Знаковая ошибка, г", y = "Число реализаций") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+```
+
+## 6. Сравнение и выводы
+
+```{r comparison}
+comparison <- data.frame(
+  Показатель = c("Среднее из 1000 оценок, г", "Эмпирическое смещение, г",
+                "Эмпирическая стандартная ошибка, г", "RMSE, г",
+                "Доля оценок с абсолютной ошибкой не более 150 г"),
+  metrics, check.names = FALSE
+)
+knitr::kable(comparison, digits = 3, row.names = FALSE)
+
+minimum_se <- names(which.min(metrics["SE", ]))
+maximum_share <- names(which(metrics["Доля", ] == max(metrics["Доля", ])))
+```
+
+1. **Наименьший разброс.** Минимальная стандартная ошибка у
+   **`r minimum_se`** — **`r round(metrics["SE", minimum_se], 3)` г**.
+   Его гистограмма уже остальных при одинаковых шкалах; сравнение
+   подтверждается рассчитанной стандартной ошибкой.
+2. **Возвращение.** В проведенном эксперименте ПСБ точнее ПСВ:
+   стандартные ошибки **`r round(metrics["SE", "ПСБ"], 2)`** и
+   **`r round(metrics["SE", "ПСВ"], 2)` г**. Для СТБ и СТВ получены
+   **`r round(metrics["SE", "СТБ"], 2)`** и
+   **`r round(metrics["SE", "СТВ"], 2)` г**. Отбор без возвращения
+   уменьшает разброс при обследовании конечной совокупности.
+3. **Стратификация.** Обе стратифицированные схемы дали меньший разброс,
+   чем соответствующие простые схемы. Средняя масса Gentoo значительно
+   выше, чем у двух других видов. Фиксация представительства видов
+   устраняет часть колебаний состава выборки.
+4. **Допустимая ошибка.** Наибольшая доля у
+   **`r paste(maximum_share, collapse = ", ")`** —
+   **`r round(100 * max(metrics["Доля", ]), 1)`%**.
+   Для ПСБ, под который планировался объем, получено
+   **`r round(100 * metrics["Доля", "ПСБ"], 1)`%** при ориентире 95%.
+   Точного совпадения не требуется: разведочная дисперсия является
+   оценкой, а 1000 повторений также дают случайные колебания. Для ПСВ
+   та же численность не гарантирует 95%, поскольку объем учитывает
+   бесповторный отбор. Стратификация может дополнительно повысить точность.
+5. **Одна реализация.** По одной выборке надежно сравнить методы нельзя:
+   более точный метод тоже может случайно дать большую ошибку. Поэтому
+   сравниваем характеристики всех 1000 оценок каждого метода.
+
+Результаты относятся к **342 записям данного набора**, а не ко всем
+пингвинам Антарктики. Небольшое эмпирическое смещение в таблице само по
+себе не означает систематического смещения метода.
+
+Источник данных: пакет `palmerpenguins`, версия
+`r as.character(packageVersion("palmerpenguins"))`;
+[Horst, Hill, Gorman](https://github.com/allisonhorst/palmerpenguins).
+Условие работы: `practicum_penguins_sampling.pdf`.

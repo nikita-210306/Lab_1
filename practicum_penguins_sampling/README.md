@@ -1,5 +1,12 @@
 # Практикум: формирование выборки
 
+`Practicum3_Markin.Rmd` — компактная версия: шесть разделов по порядку
+условия, короткие пояснения, видимый код, графики в ggplot2, итоговая таблица
+и ответы на вопросы. `Practicum3_Markin.html` — ее готовый отчет.
+Для сборки этой версии нужен также пакет `ggplot2`.
+Расчеты выполнены по исходному заданию: квантиль Стьюдента при df = 24,
+фиксированный seed, точная сумма объемов страт, знаковое смещение.
+
 `Markin_penguins_sampling.Rmd` — выполненный практикум по условию
 `practicum_penguins_sampling.pdf`: все шесть этапов, исходный R-код,
 два рисунка с восемью гистограммами и ответы на пять вопросов заключения.
@@ -8,8 +15,8 @@
 Для запуска в RStudio:
 
 ```r
-install.packages(c("palmerpenguins", "knitr", "rmarkdown")) # Один раз
-rmarkdown::render("Markin_penguins_sampling.Rmd")
+install.packages(c("palmerpenguins", "ggplot2", "knitr", "rmarkdown")) # Один раз
+rmarkdown::render("Practicum3_Markin.Rmd")
 ```
 
 Можно открыть Rmd и нажать **Knit**. Pandoc поставляется вместе с RStudio.
