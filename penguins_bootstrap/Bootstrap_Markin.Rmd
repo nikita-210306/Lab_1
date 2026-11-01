@@ -90,12 +90,17 @@ $F_n(x)=\#\{x_i\leq x\}/n$. Ступени выборочной функции �
 
 ```{r ecdf-plot, fig.cap='Рисунок 1. Эмпирические функции распределения. Вертикальные линии: красная — медиана совокупности, синяя — медиана исходной выборки.'}
 cdf_data <- rbind(
-  data.frame(Mass = pop_mass, Sample = "Генеральная совокупность"),
-  data.frame(Mass = sample_mass, Sample = "Исходная выборка")
+  data.frame(Mass = sort(pop_mass),
+             F_emp = seq_along(pop_mass) / length(pop_mass),
+             Sample = "Генеральная совокупность"),
+  data.frame(Mass = sort(sample_mass),
+             F_emp = seq_along(sample_mass) / length(sample_mass),
+             Sample = "Исходная выборка")
 )
 
-ggplot(cdf_data, aes(x = Mass, color = Sample)) +
-  stat_ecdf(geom = "line", pad = FALSE, linewidth = 0.65) +
+# Сортируются только копии масс для рисунка; исходные таблицы не меняются.
+ggplot(cdf_data, aes(x = Mass, y = F_emp, color = Sample)) +
+  geom_line(linewidth = 0.65) +
   geom_vline(xintercept = med_population, color = "#d73027", linewidth = 0.65) +
   geom_vline(xintercept = med_sample, color = "#2853b9", linewidth = 0.65) +
   scale_color_manual(values = c("Генеральная совокупность" = "#d87970",

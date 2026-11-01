@@ -4,11 +4,11 @@
 $ErrorActionPreference = 'Stop'
 $BaseUrl = 'https://raw.githubusercontent.com/nikita-210306/Lab_1/main/penguins_bootstrap'
 $Files = @(
-    @{ Name = 'Bootstrap_Markin.Rmd'; SHA256 = '259f1372abd895d73077d9def18d3af4b63a8bcf608065a83f621015f35f0a23' }
-    @{ Name = 'Bootstrap_Andreus.Rmd'; SHA256 = 'd7f94315901f456c0934f5b474d808ccde0cff61cbaaaef49ae1fe5ddb1d983b' }
-    @{ Name = 'Bootstrap_Markin.html'; SHA256 = '0c40d83af2e240d8a5b5704fb11140355dfca1c3f57b58681993caff52d582b7' }
-    @{ Name = 'Bootstrap_Andreus.html'; SHA256 = 'd6d3c87e16996b74fc8bf150c586136ebafd917ba4099a3497dcdc906ceae3eb' }
-    @{ Name = 'Explanation_and_speech.md'; SHA256 = 'c4d77834ab5de9257f89146dac70e8aa282c17124dbe08f586963490097b42be' }
+    @{ Name = 'Bootstrap_Markin.Rmd'; SHA256 = 'fbaa7e3d135b0b443487b7b84516c5ed2dd61314869576faf1d9bfcb2eb97e84' }
+    @{ Name = 'Bootstrap_Andreus.Rmd'; SHA256 = 'e36afc1a71c8e87324918eb861168a586a1d437083ce901b90c5796dc22611bd' }
+    @{ Name = 'Bootstrap_Markin.html'; SHA256 = 'c039e6552e2aced265ff8d3c6445bd08041998187db9ac90cd390cef6e2ec613' }
+    @{ Name = 'Bootstrap_Andreus.html'; SHA256 = '4b01fa34a5b7d0ef3e7aeb5b5c48f6a1dde615e9c5c472d70441152712bbc8fa' }
+    @{ Name = 'Explanation_and_speech.md'; SHA256 = '2f7cba3f77d4398b5fad01154b1a1d6c670b9c022fe7e7439e90085759f7a8a5' }
 )
 
 $Root = [System.IO.Path]::GetPathRoot($Destination)
