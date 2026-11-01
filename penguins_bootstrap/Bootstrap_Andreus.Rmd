@@ -1,0 +1,362 @@
+---
+title: "Непараметрический бутстрэп медианы массы пингвинов"
+author: "Андреус Аглая Ашотовна, Б24-902"
+date: "2026-11-01"
+lang: ru-RU
+output:
+  html_document:
+    self_contained: true
+    theme: null
+    toc: true
+    toc_depth: 2
+    mathjax: null
+    pandoc_args: ["--mathml"]
+---
+
+```{r settings, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = TRUE,
+                      fig.width = 10, fig.height = 6.3, dpi = 150,
+                      dev = "png", dev.args = list(type = "cairo"))
+options(scipen = 20)
+```
+
+```{css, echo=FALSE}
+body { max-width: 1120px; margin: 2em auto; padding: 0 1em;
+       font: 17px/1.5 Georgia, "Times New Roman", serif; color: #17212b; }
+h1, h2, h3 { line-height: 1.25; }
+pre { background: #f4f6f8; padding: 1em; overflow-x: auto; font-size: 13px; }
+table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+th, td { border-bottom: 1px solid #ccd3da; padding: .45em .6em; }
+img { max-width: 100%; height: auto; }
+.caption { font-style: italic; }
+```
+
+## 1. Исходные данные и выборка
+
+Изучается масса тела пингвинов трех видов из набора Palmer Penguins.
+Генеральная совокупность для практикума — **342 записи с известной массой**.
+Ее медиана нужна для проверки результата, но не участвует в построении
+бутстрэп-выборок или доверительного интервала. Стратификация не проводится.
+
+```{r initial-sample}
+# Эти пакеты устанавливаются один раз перед первой сборкой:
+# install.packages(c("palmerpenguins", "ggplot2", "knitr", "rmarkdown"))
+library(palmerpenguins)
+library(ggplot2)
+
+population <- as.data.frame(
+  penguins[!is.na(penguins$body_mass_g), c("species", "body_mass_g")]
+)
+rownames(population) <- NULL
+
+# Указываем алгоритмы генератора, чтобы повторить заданную серию.
+RNGkind(kind = "Mersenne-Twister", normal.kind = "Inversion",
+        sample.kind = "Rejection")
+set.seed(2026)
+start_rows <- sample.int(342, size = 80, replace = TRUE)
+initial_sample <- population[start_rows, , drop = FALSE]
+
+all_masses <- population$body_mass_g
+observed_masses <- initial_sample$body_mass_g
+population_median <- median(all_masses)
+sample_median <- median(observed_masses)
+
+stopifnot(nrow(population) == 342L, nrow(initial_sample) == 80L,
+          !anyNA(observed_masses))
+
+show_number <- function(x) {
+  format(x, digits = 10, trim = TRUE, scientific = FALSE)
+}
+knitr::kable(data.frame(
+  Показатель = c("Объем совокупности", "Объем исходной выборки",
+                "Медиана совокупности, г", "Медиана исходной выборки, г"),
+  Значение = c(length(all_masses), length(observed_masses),
+              population_median, sample_median)
+), row.names = FALSE)
+```
+
+Зерно исходного отбора — **2026**. Повторения записей допустимы: это 80
+извлечений с возвращением. Порядок строк `population` не изменялся.
+Медиана совокупности — **`r show_number(population_median)` г**,
+медиана выборки — **`r show_number(sample_median)` г**.
+
+### Эмпирические функции распределения
+
+Эмпирическая функция показывает долю наблюдений с массой не больше $x$:
+$F_n(x)=\#\{x_i\leq x\}/n$. Ступени выборочной функции крупнее, потому что
+в выборке всего 80 извлечений, а в совокупности 342 записи.
+Для сопоставления с образцом на рисунке соединены значения эмпирических
+функций в наблюдаемых точках; сами эмпирические функции ступенчатые.
+
+```{r ecdf-plot, fig.cap='Рисунок 1. Эмпирические функции распределения. Вертикальные линии: красная — медиана совокупности, синяя — медиана исходной выборки.'}
+distribution_data <- rbind(
+  data.frame(Mass = all_masses, Sample = "Генеральная совокупность"),
+  data.frame(Mass = observed_masses, Sample = "Исходная выборка")
+)
+
+ggplot(distribution_data, aes(x = Mass, color = Sample)) +
+  stat_ecdf(geom = "line", pad = FALSE, linewidth = 0.65) +
+  geom_vline(xintercept = population_median, color = "#d73027", linewidth = 0.65) +
+  geom_vline(xintercept = sample_median, color = "#2853b9", linewidth = 0.65) +
+  scale_color_manual(values = c("Генеральная совокупность" = "#d87970",
+                                "Исходная выборка" = "#36a5aa")) +
+  labs(title = "Распределение массы тела", x = "Mass, г", y = "F_emp",
+       color = "Sample")
+```
+
+Кривые близки, но не совпадают: случайный отбор меняет частоты масс,
+включает некоторые записи несколько раз и не включает другие. Выборочная
+медиана выше медианы совокупности на
+**`r show_number(sample_median - population_median)` г**.
+
+### Гистограмма исходной выборки
+
+Границы интервалов задаются явно. Это сохраняет положение и высоту
+столбцов при разных версиях `ggplot2`: 10 интервалов с центрами от
+минимальной до максимальной массы выборки.
+
+```{r sample-histogram, fig.cap='Рисунок 2. Масса тела в исходной выборке. Вертикальная линия — выборочная медиана.'}
+mass_bin_width <- diff(range(observed_masses)) / (10 - 1)
+mass_limits <- seq(min(observed_masses) - mass_bin_width / 2,
+                     max(observed_masses) + mass_bin_width / 2, length.out = 11)
+hist_fill <- "#897599"
+
+ggplot(data.frame(Mass = observed_masses), aes(x = Mass)) +
+  geom_histogram(breaks = mass_limits, fill = hist_fill) +
+  geom_vline(xintercept = sample_median, linewidth = 0.65) +
+  labs(title = "Исходная выборка: 80 извлечений", x = "Mass, г", y = "count")
+```
+
+## 2. Одна последовательность бутстрэп-медиан
+
+Зерно **2027** задается один раз перед циклом. Каждая новая выборка
+содержит 80 извлечений с возвращением **только из исходной выборки**.
+
+```{r bootstrap}
+max_repeats <- 10000L
+median_repeats <- numeric(max_repeats)
+
+set.seed(2027)
+for (iteration in seq_len(max_repeats)) {
+  resample_rows <- sample.int(80, size = 80, replace = TRUE)
+  bootstrap_sample <- initial_sample[resample_rows, , drop = FALSE]
+  median_repeats[iteration] <- median(bootstrap_sample$body_mass_g)
+}
+
+stopifnot(length(median_repeats) == 10000L, all(is.finite(median_repeats)))
+```
+
+Вектор `median_repeats` сохраняет все 10 000 медиан **в порядке получения**.
+В следующих разделах он используется без нового моделирования.
+
+## 3. Оценки и 95%-й процентильный интервал
+
+Среднее бутстрэп-медиан оценивает центр бутстрэп-распределения.
+Стандартная ошибка — стандартное отклонение этих медиан.
+Бутстрэп-смещение считается относительно медианы исходной выборки:
+
+$$\widehat{\mathrm{Bias}}=\overline{\theta^*}-\widehat\theta,
+\qquad CI_{0.95}=[q_{0.025}(\theta^*);q_{0.975}(\theta^*)].$$
+
+```{r full-statistics}
+average_median <- mean(median_repeats)
+median_se <- sd(median_repeats)
+median_bias <- average_median - sample_median
+percentile_interval <- quantile(median_repeats, probs = c(0.025, 0.975),
+                     type = 7, names = FALSE)
+interval_width <- percentile_interval[2] - percentile_interval[1]
+contains_population <- population_median >= percentile_interval[1] && population_median <= percentile_interval[2]
+
+main_results <- data.frame(
+  Показатель = c("Среднее бутстрэп-медиан, г", "Стандартная ошибка, г",
+                "Бутстрэп-смещение, г", "Нижняя граница интервала, г",
+                "Верхняя граница интервала, г", "Ширина интервала, г"),
+  Значение = sapply(c(average_median, median_se, median_bias, percentile_interval, interval_width),
+                   show_number),
+  check.names = FALSE
+)
+knitr::kable(main_results, row.names = FALSE)
+```
+
+Среднее бутстрэп-медиан — **`r show_number(average_median)` г**.
+Оно отличается от выборочной медианы **`r show_number(sample_median)` г**
+и медианы совокупности **`r show_number(population_median)` г**.
+Процентильный интервал — **[`r show_number(percentile_interval[1])`;
+`r show_number(percentile_interval[2])`] г**, его ширина —
+**`r show_number(interval_width)` г**.
+Медиана полной совокупности **`r if (contains_population) "попадает" else "не попадает"`**
+в этот интервал. Она не использовалась для его расчета.
+
+```{r bootstrap-histogram, fig.cap='Рисунок 3. Распределение 10 000 бутстрэп-медиан. Отмечены медиана выборки, среднее бутстрэп-медиан, границы интервала и эталонная медиана.'}
+median_bin_width <- diff(range(median_repeats)) / (30 - 1)
+median_limits <- seq(min(median_repeats) - median_bin_width / 2,
+                   max(median_repeats) + median_bin_width / 2, length.out = 31)
+reference_lines <- data.frame(
+  Value = c(percentile_interval, sample_median, average_median, population_median),
+  Role = c("Границы 95%-го интервала", "Границы 95%-го интервала",
+           "Медиана выборки", "Среднее бутстрэп-медиан", "Медиана совокупности")
+)
+
+ggplot(data.frame(Median = median_repeats), aes(x = Median)) +
+  geom_histogram(breaks = median_limits, fill = hist_fill) +
+  geom_vline(data = reference_lines, aes(xintercept = Value, color = Role),
+             linewidth = 0.65) +
+  scale_color_manual(values = c("Границы 95%-го интервала" = "#333333",
+                                "Медиана выборки" = "#d73027",
+                                "Среднее бутстрэп-медиан" = "#2853b9",
+                                "Медиана совокупности" = "#44ad45")) +
+  labs(title = "Бутстрэп-распределение медианы", x = "Median, г", y = "count",
+       color = "Линии")
+```
+
+## 4. Влияние числа повторений
+
+Выполняется повышенный вариант: **100 значений $B$ от 100 до 10 000 с
+шагом 100**. Берутся вложенные начала одного сохраненного вектора.
+Объем каждой бутстрэп-выборки остается равным 80.
+
+```{r stability-calculations}
+repeat_grid <- seq(100L, max_repeats, by = 100L)
+stability_results <- data.frame(
+  B = repeat_grid, Mean = NA_real_, Deviation = NA_real_, SE = NA_real_,
+  Lower = NA_real_, Upper = NA_real_, Width = NA_real_, Signed = NA_real_
+)
+
+for (position in seq_along(repeat_grid)) {
+  b <- repeat_grid[position]
+  first_medians <- median_repeats[seq_len(b)]
+  average <- mean(first_medians)
+  bounds <- quantile(first_medians, c(0.025, 0.975), type = 7, names = FALSE)
+  stability_results$Mean[position] <- average
+  stability_results$Deviation[position] <- abs(average - average_median)
+  stability_results$SE[position] <- sd(first_medians)
+  stability_results$Lower[position] <- bounds[1]
+  stability_results$Upper[position] <- bounds[2]
+  stability_results$Width[position] <- bounds[2] - bounds[1]
+  stability_results$Signed[position] <- average - average_median
+}
+```
+
+Ориентир — среднее при $B=10\,000$. Отклонение $D_B$ характеризует
+устойчивость вычисления, а не ошибку относительно медианы совокупности:
+
+$$D_B=\left|\overline{\theta^*}_{1:B}
+-\overline{\theta^*}_{1:10000}\right|.$$
+
+```{r deviation-plot, fig.cap='Рисунок 4. Абсолютное отклонение среднего бутстрэп-медиан от результата при B = 10 000 — график по условию.'}
+ggplot(stability_results, aes(x = B, y = Deviation)) +
+  geom_line(color = hist_fill, linewidth = 0.7) +
+  labs(title = "Устойчивость среднего бутстрэп-медиан", x = "B",
+       y = "Абсолютное отклонение, г")
+```
+
+```{r width-plot, fig.cap='Рисунок 5. Ширина 95%-го процентильного интервала при добавлении новых бутстрэп-повторений.'}
+ggplot(stability_results, aes(x = B, y = Width)) +
+  geom_line(color = hist_fill, linewidth = 0.7) +
+  labs(title = "Устойчивость доверительного интервала", x = "B", y = "Range, г")
+```
+
+При $B=10\,000$ отклонение равно нулю **по определению ориентира**.
+Это не означает, что истинная медиана оценена без ошибки. Ширина интервала
+и отклонение меняются немонотонно, так как при добавлении медиан меняются
+эмпирические квантили и среднее.
+
+## 5. Итоговая таблица
+
+```{r comparison-table}
+report_sizes <- c(100, 1000, 2000, 5000, 10000)
+report_rows <- stability_results[stability_results$B %in% report_sizes, ]
+comparison_table <- data.frame(
+  Показатель = c("Средняя бутстрэп-медиан, г", "Отклонение от B = 10 000, г",
+                "Стандартная ошибка, г", "Нижняя граница интервала, г",
+                "Верхняя граница интервала, г", "Ширина интервала, г"),
+  check.names = FALSE
+)
+for (position in seq_len(nrow(report_rows))) {
+  values <- c(report_rows$Mean[position], report_rows$Deviation[position], report_rows$SE[position],
+              report_rows$Lower[position], report_rows$Upper[position], report_rows$Width[position])
+  comparison_table[[as.character(report_rows$B[position])]] <-
+    sapply(values, show_number)
+}
+knitr::kable(comparison_table, row.names = FALSE)
+```
+
+Округление применяется только при выводе чисел. Все последующие расчеты
+выполняются по неокругленным значениям. Ширина при $B=100$ равна
+**`r show_number(report_rows$Width[1])` г**.
+
+### Сохранение результатов
+
+```{r save-results}
+save_folder <- "results_Andreus"
+dir.create(save_folder, showWarnings = FALSE, recursive = TRUE)
+write.csv(data.frame(Repeat = seq_len(max_repeats), Median = median_repeats),
+          file.path(save_folder, "bootstrap_medians.csv"), row.names = FALSE)
+write.csv(stability_results, file.path(save_folder, "stability_all_B.csv"),
+          row.names = FALSE)
+write.csv(report_rows, file.path(save_folder, "control_values.csv"), row.names = FALSE)
+write.csv(data.frame(Draw = seq_len(80), Population_row = start_rows,
+                     initial_sample),
+          file.path(save_folder, "initial_sample.csv"), row.names = FALSE)
+```
+
+## 6. Выводы и ответы на вопросы
+
+1. **Различия распределений и медиан.** Выборка случайна и содержит
+   повторения. Частоты масс в ней отличаются от частот всей совокупности,
+   поэтому функции распределения и медианы не обязаны совпадать.
+   Здесь получены `r show_number(sample_median)` г по выборке и
+   `r show_number(population_median)` г по совокупности.
+2. **Почему бутстрэп строится из исходной выборки?** Именно ее эмпирическое
+   распределение заменяет неизвестное распределение в задаче оценивания.
+   Отбор из 342 записей стал бы новым моделированием из известной
+   совокупности и не оценивал бы неопределенность этой исходной выборки.
+3. **Что показывает стандартная ошибка?** Разброс бутстрэп-медиан,
+   то есть неопределенность оценки медианы. Получено
+   **`r show_number(median_se)` г**. Это отличается от стандартного
+   отклонения масс отдельных птиц: оно описывает изменчивость признака,
+   а не изменчивость оценки.
+4. **Как влияет увеличение $B$?** Уменьшает вычислительные колебания среднего
+   и квантилей бутстрэп-распределения. Однако на каждом отдельном шаге
+   показатели могут колебаться в обе стороны.
+5. **Почему интервал не обязан сужаться, а оценка — приближаться к
+   истинной медиане?** Увеличивается число повторений, а не объем исходной
+   выборки: он остается 80. Новая информация о совокупности не добавляется.
+   Большое $B$ точнее описывает бутстрэп-распределение данной выборки,
+   но не устраняет ее отличие от совокупности.
+6. **Можно ли оценить покрытие по одному интервалу?** Нет. Здесь медиана
+   совокупности `r show_number(population_median)` г находится внутри
+   [`r show_number(percentile_interval[1])`; `r show_number(percentile_interval[2])`] г, но один такой исход
+   не устанавливает фактическую вероятность покрытия. Для ее оценки нужны
+   многие независимые исходные выборки и интервалы по каждой из них;
+   в этом практикуме такое исследование не требуется.
+
+Выводы относятся к заданной конечной совокупности из 342 записей.
+Среднее бутстрэп-медиан `r show_number(average_median)` г, выборочная медиана
+`r show_number(sample_median)` г и медиана совокупности
+`r show_number(population_median)` г имеют разные назначения. Бутстрэп-смещение относительно
+выборочной медианы равно **`r show_number(median_bias)` г**.
+
+## Дополнение: сопоставление с графиком образца
+
+В графике образца, подписанном `Bias`, есть отрицательные значения.
+Поэтому для сопоставления ниже показана **знаковая вычислительная разность**
+$\overline{\theta^*}_{1:B}-\overline{\theta^*}_{1:10000}$.
+Это отдельный показатель: он не равен абсолютному отклонению из условия
+и не равен бутстрэп-смещению относительно выборочной медианы.
+Обязательный график абсолютного отклонения приведен на рисунке 4.
+
+```{r signed-reference-plot, fig.cap='Дополнительный рисунок. Знаковая разность с вычислительным ориентиром — для сопоставления с графиком Bias из образца.'}
+ggplot(stability_results, aes(x = B, y = Signed)) +
+  geom_line(color = hist_fill, linewidth = 0.7) +
+  labs(title = "Знаковая разность с результатом при B = 10 000",
+       x = "B", y = "Bias, г")
+```
+
+Источники: условие `practicum_penguins_bootstrap.pdf`; пакет
+`palmerpenguins` версии `r as.character(packageVersion("palmerpenguins"))`;
+Gorman, Williams, Fraser (2014), DOI: 10.1371/journal.pone.0090081.
+
+Для сборки открыть `.Rmd` в RStudio и нажать **Knit**.
+Дополнительные исходные CSV или XLSX не нужны: данные поступают из пакета.
+В отчете видны R-код, результаты, таблицы и все графики.
